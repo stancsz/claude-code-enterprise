@@ -14,6 +14,7 @@ sequenceDiagram
     participant Wrapper as Governance Wrapper
     participant Hook as Governance Hook (Plugin)
     participant Audit as Audit Log (Evidence)
+    participant SIEM as External SIEM
     participant Claude as Claude Code Core
 
     User->>Wrapper: Run ./bin/claude-enterprise
@@ -24,13 +25,21 @@ sequenceDiagram
     rect rgb(255, 230, 230)
     note right of User: Input Governance
     Claude->>Hook: UserPromptSubmit Event
-    Hook->>Hook: Check PII (Regex)
+    Hook->>Hook: Check PII (Regex + Config)
     Hook->>Hook: Classify Risk (Keywords)
-    Hook->>Audit: Log Input Metadata (Original + Redacted)
+    Hook->>Audit: Log Input Metadata
+    Hook->>SIEM: Stream Log (HTTP)
 
-    alt PII Detected OR High Risk
+    alt PII Detected
         Hook-->>Claude: BLOCK / EXIT
         Claude-->>User: "Governance Alert: Blocked"
+    else High Risk
+        alt Interactive Mode
+            Hook-->>User: "Confirm High Risk?"
+            User-->>Hook: Yes/No
+        else Block Mode
+            Hook-->>Claude: BLOCK
+        end
     else Safe
         Hook-->>Claude: ALLOW
     end
@@ -42,7 +51,7 @@ sequenceDiagram
     note right of User: Tool Governance
     Claude->>Hook: PreToolUse Event
     Hook->>Audit: Log Tool Intent
-    Hook->>Hook: Check Dangerous Commands (e.g. rm -rf)
+    Hook->>Hook: Check Dangerous Commands
 
     alt Dangerous
         Hook-->>Claude: BLOCK
@@ -53,6 +62,21 @@ sequenceDiagram
 
     Claude->>User: Final Output
 ```
+
+## Configuration
+
+You can configure the governance layer by creating a `~/.claude/governance_config.json` file. A template is available at `governance/config.json.example`.
+
+### Configurable Options
+1.  **SIEM Integration (`audit_endpoint`):**
+    *   Set `audit_endpoint` to your Splunk/Datadog HTTP Event Collector URL.
+    *   The hook will send JSON payloads to this endpoint in real-time.
+2.  **Custom PII Patterns (`pii_patterns`):**
+    *   Define custom regex patterns for your organization (e.g., Project IDs, Employee IDs).
+    *   Example: `"employee_id": "EID-\\d{5}"`.
+3.  **Human-in-the-Loop (`hitl_mode`):**
+    *   Set to `"block"` (default) to strictly reject High Risk prompts.
+    *   Set to `"interactive"` to prompt the user for confirmation via the terminal.
 
 ## Evidence Gathering
 
@@ -68,7 +92,7 @@ To satisfy external auditors (ISO 42001) or regulatory bodies (EU AI Act), the f
 
 ### How to Extract Evidence
 1.  **Audit Logs:** The JSON-lines format in `~/.claude/governance_audit.log` can be ingested into SIEM tools (Splunk, Datadog) or parsed via script to generate compliance reports.
-2.  **Policy Documents:** Maintain version-controlled copies of the Markdown files in this directory. Changes to `AI_POLICY.md` should be treated as policy updates.
+2.  **Periodic Assessment:** Run `scripts/risk_assessment.sh` quarterly to verify the health of the governance layer.
 
 ## Suggestive Actions for Enterprise Governance Teams
 

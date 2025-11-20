@@ -1,4 +1,6 @@
-# Claude Code
+# Claude Code - Enterprise Governance Fork
+
+> **Note:** This is a fork of the open source version of [Claude Code](https://github.com/anthropics/claude-code), which adds a **Governance Layer** for enterprise compliance (ISO/IEC 42001 and prEN 18286 / EU AI Act).
 
 ![](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square) [![npm]](https://www.npmjs.com/package/@anthropic-ai/claude-code)
 
@@ -10,33 +12,38 @@ Claude Code is an agentic coding tool that lives in your terminal, understands y
 
 <img src="./demo.gif" />
 
-## Get started
+## Enterprise Governance Layer
 
-1. Install Claude Code:
+This fork introduces an **AI Governance Layer** designed to transform the model into a compliant AI System (AIS). It is implemented as an add-on (Plugin + Wrapper) to ensure compatibility with future upgrades.
 
-**MacOS/Linux:**
-```bash
-curl -fsSL https://claude.ai/install.sh | bash
-```
+### Key Features
+1.  **Input/Prompt Risk Filter:** Automatically redacts PII and proprietary data.
+2.  **Use Case/Risk Classifier:** Classifies prompt intent (Low vs High Risk) to trigger appropriate checks.
+3.  **Model Traceability:** Logs model version, dataset IDs, and configuration.
+4.  **Output Guardrails:** Scans for malicious code and enforces Human-in-the-Loop for high-risk outputs.
+5.  **Audit Trail:** Centralized, tamper-proof logging for ISO/EU AI Act compliance.
 
-**Homebrew (MacOS):**
-```bash
-brew install --cask claude-code
-```
+### Compliance
+*   **ISO/IEC 42001 (AIMS):** Includes AI Policy, Risk Assessment tooling, and Competence documentation.
+*   **EU AI Act (prEN 18286):** Includes Technical Documentation templates, Transparency checks, and Post-Market Monitoring.
 
-**Windows:**
-```powershell
-irm https://claude.ai/install.ps1 | iex
-```
+See the `governance/` directory for policy and compliance documents.
 
-**NPM:**
-```bash
-npm install -g @anthropic-ai/claude-code
-```
+## Get started (Enterprise)
 
-NOTE: If installing with NPM, you also need to install [Node.js 18+](https://nodejs.org/en/download/)
+1.  Install the base Claude Code:
+    ```bash
+    npm install -g @anthropic-ai/claude-code
+    ```
 
-2. Navigate to your project directory and run `claude`.
+2.  Install the Governance Plugin (Local Install):
+    *   Navigate to this repository.
+    *   Run `claude plugin install ./plugins/governance-layer`
+
+3.  Run with Governance Wrapper:
+    ```bash
+    ./bin/claude-enterprise
+    ```
 
 ## Plugins
 

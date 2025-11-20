@@ -1,0 +1,10 @@
+{
+  "name": "governance-layer",
+  "version": "1.0.0",
+  "description": "Enterprise AI Governance Layer for ISO/IEC 42001 & EU AI Act compliance. Includes PII redaction, risk classification, and audit logging.",
+  "author": {
+    "name": "Enterprise Governance Team",
+    "email": "governance@example.com"
+  },
+  "hooks": "./hooks/hooks.json"
+}

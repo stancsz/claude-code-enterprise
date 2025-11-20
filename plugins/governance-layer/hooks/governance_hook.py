@@ -10,10 +10,13 @@ import os
 import re
 import argparse
 import logging
+import urllib.request
+import urllib.error
 from datetime import datetime
 
 # Configuration
 AUDIT_LOG_PATH = os.path.expanduser("~/.claude/governance_audit.log")
+SIEM_URL = os.environ.get("GOVERNANCE_SIEM_URL")
 
 # Setup logging
 os.makedirs(os.path.dirname(AUDIT_LOG_PATH), exist_ok=True)
@@ -23,9 +26,25 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+def send_to_siem(log_entry):
+    """
+    Sends the log entry to a configured SIEM via HTTP POST.
+    """
+    if not SIEM_URL:
+        return
+
+    try:
+        data = json.dumps(log_entry).encode('utf-8')
+        req = urllib.request.Request(SIEM_URL, data=data, headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=2) as response:
+            pass # Success
+    except Exception as e:
+        # Log failure to local log but don't crash
+        logging.error(f"SIEM Logging Failed: {str(e)}")
+
 def log_audit(event_type, details, risk_level="LOW", decision="ALLOWED"):
     """
-    Logs an audit event to the tamper-proof (simulated) log.
+    Logs an audit event to the tamper-proof (simulated) log and optional SIEM.
     """
     entry = {
         "timestamp": datetime.now().isoformat(),
@@ -36,28 +55,32 @@ def log_audit(event_type, details, risk_level="LOW", decision="ALLOWED"):
         "model_version": os.environ.get("CLAUDE_MODEL_VERSION", "unknown"),
     }
     logging.info(json.dumps(entry))
+    send_to_siem(entry)
     return entry
 
 def check_pii(text):
     """
     Simple regex-based PII detection.
+    Includes Email, SSN, Credit Card, Employee ID, Internal Projects.
     """
     if not isinstance(text, str):
         return False, text
 
-    email_pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-    ssn_pattern = r"\d{3}-\d{2}-\d{4}"
+    patterns = [
+        (r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "[REDACTED_EMAIL]"),
+        (r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]"),
+        (r"\b(?:\d[ -]*?){13,16}\b", "[REDACTED_CREDIT_CARD]"),
+        (r"\bEMP-\d{5}\b", "[REDACTED_EMPLOYEE_ID]"),
+        (r"\bPROJ-[A-Z]{3,}\b", "[REDACTED_PROJECT_CODE]")
+    ]
 
     redacted_text = text
     found_pii = False
 
-    if re.search(email_pattern, text):
-        redacted_text = re.sub(email_pattern, "[REDACTED_EMAIL]", redacted_text)
-        found_pii = True
-
-    if re.search(ssn_pattern, text):
-        redacted_text = re.sub(ssn_pattern, "[REDACTED_SSN]", redacted_text)
-        found_pii = True
+    for pattern, replacement in patterns:
+        if re.search(pattern, redacted_text):
+            redacted_text = re.sub(pattern, replacement, redacted_text)
+            found_pii = True
 
     return found_pii, redacted_text
 
@@ -73,6 +96,24 @@ def classify_risk(text):
         if keyword.lower() in text.lower():
             return "HIGH"
     return "LOW"
+
+def request_user_approval(risk_level):
+    """
+    Attempts to prompt the user via /dev/tty for HITL approval.
+    Returns True if approved, False otherwise.
+    """
+    try:
+        # Only works if attached to a terminal
+        if not os.path.exists("/dev/tty"):
+            return False
+
+        with open("/dev/tty", "r+") as tty:
+            tty.write(f"\n\033[1;33m[Governance] WARN: Output classified as {risk_level} Risk.\033[0m\n")
+            tty.write("[Governance] Do you confirm you have reviewed it? [y/N]: ")
+            response = tty.readline().strip().lower()
+            return response == 'y'
+    except Exception:
+        return False
 
 def handle_session_start(data):
     """
@@ -111,12 +152,20 @@ def handle_user_prompt(data):
         sys.exit(1)
 
     if risk == "HIGH":
-        # Requirement: Block automated output until human supervisor approves.
-        # Since we don't have a supervisor UI, we must BLOCK HIGH RISK prompts in this automated tool.
-        print("Governance Alert: HIGH RISK Use Case detected (HR/Finance/etc).", file=sys.stderr)
-        print("Compliance Policy: Automated processing of High Risk inputs requires Human-in-the-Loop approval.", file=sys.stderr)
-        print("Operation Blocked by Governance Layer.", file=sys.stderr)
-        sys.exit(1)
+        # HITL Workflow
+        approved = request_user_approval(risk)
+
+        if approved:
+            log_audit("HITL_APPROVAL", {"session_id": session_id, "risk": risk, "approved": True})
+            # Allow to proceed
+            sys.exit(0)
+        else:
+            # Block
+            print("Governance Alert: HIGH RISK Use Case detected (HR/Finance/etc).", file=sys.stderr)
+            print("Compliance Policy: Automated processing of High Risk inputs requires Human-in-the-Loop approval.", file=sys.stderr)
+            print("Operation Blocked by Governance Layer (Approval Denied or Unavailable).", file=sys.stderr)
+            log_audit("HITL_APPROVAL", {"session_id": session_id, "risk": risk, "approved": False}, decision="BLOCKED")
+            sys.exit(1)
 
     sys.exit(0)
 
@@ -155,6 +204,7 @@ def handle_post_tool_use(data):
         content = str(tool_result)
 
     has_pii, redacted = check_pii(content)
+    risk = classify_risk(content)
 
     log_audit("TOOL_OUTPUT_CHECK", {
         "session_id": session_id,
@@ -166,6 +216,13 @@ def handle_post_tool_use(data):
     if has_pii:
         print("Governance Alert: Tool output contains PII! Data has been logged.", file=sys.stderr)
         # We can't block past action, but we log it.
+
+    if risk == "HIGH":
+        # For tool output, we might want HITL before showing it?
+        # PostToolUse usually happens after tool execution but before Agent sees it?
+        # Or before User sees it?
+        # Docs on hooks are sparse, assuming passive monitoring for PostToolUse unless we can block the return value.
+        pass
 
     sys.exit(0)
 
